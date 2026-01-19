@@ -1,0 +1,6 @@
+[submodule "parser/src/main/cpp/hyprlang"]
+	path = parser/src/main/cpp/hyprlang
+	url = https://github.com/hyprwm/hyprlang.git
+[submodule "parser/src/main/cpp/hyprutils"]
+	path = parser/src/main/cpp/hyprutils
+	url = https://github.com/hyprwm/hyprutils.git
