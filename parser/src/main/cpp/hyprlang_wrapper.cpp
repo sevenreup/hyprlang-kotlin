@@ -1,7 +1,10 @@
 #include <android/log.h>
+#include <any>
 #include <hyprlang.hpp>
 #include <jni.h>
 #include <string>
+#include <tuple>
+#include <typeinfo>
 #include <vector>
 
 #define TAG "HyprlangWrapper"
@@ -10,77 +13,157 @@
 
 using namespace Hyprlang;
 
-extern "C" JNIEXPORT jobject JNICALL
-Java_com_hyprlang_parser_HyprlangParser_parseNative(JNIEnv *env, jobject thiz,
-                                                    jstring input) {
+struct WrapperContext {
+  std::vector<std::tuple<std::string, std::string>> keys;
+  CConfig *lastConfig = nullptr;
+
+  ~WrapperContext() {
+    if (lastConfig)
+      delete lastConfig;
+  }
+};
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_hyprlang_parser_HyprlangParser_create(JNIEnv *env, jobject thiz) {
+  LOGD("create called");
+  return reinterpret_cast<jlong>(new WrapperContext());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_hyprlang_parser_HyprlangParser_destroy(JNIEnv *env, jobject thiz,
+                                                jlong handle) {
+  LOGD("destroy called");
+  auto *ctx = reinterpret_cast<WrapperContext *>(handle);
+  delete ctx;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_hyprlang_parser_HyprlangParser_addConfigValue(
+    JNIEnv *env, jobject thiz, jlong handle, jstring name, jstring type,
+    jobject defaultValue) {
+  auto *ctx = reinterpret_cast<WrapperContext *>(handle);
+
+  const char *nameStr = env->GetStringUTFChars(name, 0);
+  const char *typeStr = env->GetStringUTFChars(type, 0);
+
+  LOGD("addConfigValue: %s type: %s", nameStr, typeStr);
+
+  ctx->keys.emplace_back(nameStr, typeStr);
+
+  env->ReleaseStringUTFChars(name, nameStr);
+  env->ReleaseStringUTFChars(type, typeStr);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_hyprlang_parser_HyprlangParser_parse(JNIEnv *env, jobject thiz,
+                                              jlong handle, jstring input) {
+  LOGD("parse called");
+  auto *ctx = reinterpret_cast<WrapperContext *>(handle);
   const char *nativeInput = env->GetStringUTFChars(input, 0);
 
-  // Use stream mode to parse string directly
+  // LOGD("Input: %s", nativeInput);
+
+  if (ctx->lastConfig) {
+    LOGD("Deleting old config");
+    delete ctx->lastConfig;
+    ctx->lastConfig = nullptr;
+  }
+
   SConfigOptions options;
   options.pathIsStream = true;
   options.verifyOnly = false;
-  options.allowMissingConfig = true; // Safety
-
-  CConfig *config = nullptr;
-  std::string errorMsg = "";
+  options.allowMissingConfig = true;
 
   try {
-    config = new CConfig(nativeInput, options);
+    LOGD("Creating CConfig");
+    ctx->lastConfig = new CConfig(nativeInput, options);
 
-    // Register values to avoid errors about unknown keys
-    config->addConfigValue("general:border_size", CConfigValue((INT)0));
-    config->addConfigValue("general:gaps_in", CConfigValue((INT)0));
-    config->addConfigValue("general:gaps_out", CConfigValue((INT)0));
+    // Register all keys
+    for (const auto &[k, type] : ctx->keys) {
+      LOGD("Registering key: %s", k.c_str());
+      if (type == "INT")
+        ctx->lastConfig->addConfigValue(k.c_str(), CConfigValue((INT)0));
+      else if (type == "FLOAT")
+        ctx->lastConfig->addConfigValue(k.c_str(), CConfigValue((FLOAT)0.0));
+      else if (type == "STRING")
+        ctx->lastConfig->addConfigValue(k.c_str(), CConfigValue((STRING) ""));
+      else if (type == "VEC2")
+        ctx->lastConfig->addConfigValue(k.c_str(),
+                                        CConfigValue(SVector2D{0, 0}));
+      else
+        LOGE("Unknown type: %s", type.c_str());
+    }
 
-    config->commence();
+    LOGD("Commencing");
+    ctx->lastConfig->commence();
+    LOGD("Parsing");
+    CParseResult result = ctx->lastConfig->parse();
 
-    CParseResult result = config->parse();
+    env->ReleaseStringUTFChars(input, nativeInput);
 
     if (result.error) {
-      if (result.getError()) {
-        errorMsg = result.getError();
-      } else {
-        errorMsg = "Unknown error";
-      }
-      LOGE("Parse error: %s", errorMsg.c_str());
-    } else {
-      LOGD("Parse successful!");
-
-      // Retrieve values to prove it works
-      auto val = config->getConfigValue("general:border_size");
-      if (val.has_value()) {
-        try {
-          // Check type before casting to avoid bad_any_cast
-          if (val.type() == typeid(INT)) {
-            INT borderSize = std::any_cast<INT>(val);
-            LOGD("Border size: %lld", (long long)borderSize);
-          } else {
-            LOGE("Border size is not INT");
-          }
-        } catch (const std::exception &e) {
-          LOGE("Failed to cast border size: %s", e.what());
-        }
-      }
+      LOGE("Parse error: %s",
+           result.getError() ? result.getError() : "Unknown");
+      return env->NewStringUTF(result.getError() ? result.getError()
+                                                 : "Unknown Error");
     }
+    LOGD("Parse success");
+    return env->NewStringUTF("");
+
   } catch (const std::exception &e) {
-    errorMsg = std::string("C++ Exception: ") + e.what();
-    LOGE("%s", errorMsg.c_str());
-    if (config)
-      delete config;
+    LOGE("Exception: %s", e.what());
     env->ReleaseStringUTFChars(input, nativeInput);
-    return env->NewStringUTF(errorMsg.c_str());
+    return env->NewStringUTF(e.what());
   } catch (...) {
-    errorMsg = "Unknown C++ Exception";
-    LOGE("%s", errorMsg.c_str());
-    if (config)
-      delete config;
+    LOGE("Unknown Exception");
     env->ReleaseStringUTFChars(input, nativeInput);
-    return env->NewStringUTF(errorMsg.c_str());
+    return env->NewStringUTF("Unknown C++ Exception");
+  }
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_hyprlang_parser_HyprlangParser_getConfigValue(JNIEnv *env,
+                                                       jobject thiz,
+                                                       jlong handle,
+                                                       jstring name) {
+  auto *ctx = reinterpret_cast<WrapperContext *>(handle);
+  if (!ctx->lastConfig)
+    return nullptr;
+
+  const char *n = env->GetStringUTFChars(name, 0);
+  // LOGD("getConfigValue: %s", n);
+  auto val = ctx->lastConfig->getConfigValue(n);
+  env->ReleaseStringUTFChars(name, n);
+
+  if (!val.has_value()) {
+    // LOGD("Value not found");
+    return nullptr;
   }
 
-  if (config)
-    delete config;
-  env->ReleaseStringUTFChars(input, nativeInput);
-
-  return env->NewStringUTF(errorMsg.c_str());
+  try {
+    if (val.type() == typeid(INT)) {
+      long long v = std::any_cast<INT>(val);
+      jclass cls = env->FindClass("java/lang/Integer");
+      jmethodID mid =
+          env->GetStaticMethodID(cls, "valueOf", "(I)Ljava/lang/Integer;");
+      return env->CallStaticObjectMethod(cls, mid, (int)v);
+    } else if (val.type() == typeid(FLOAT)) {
+      float v = std::any_cast<FLOAT>(val);
+      jclass cls = env->FindClass("java/lang/Float");
+      jmethodID mid =
+          env->GetStaticMethodID(cls, "valueOf", "(F)Ljava/lang/Float;");
+      return env->CallStaticObjectMethod(cls, mid, v);
+    } else if (val.type() == typeid(STRING)) {
+      try {
+        const char *s = std::any_cast<STRING>(val);
+        return env->NewStringUTF(s);
+      } catch (...) {
+        return nullptr;
+      }
+    }
+  } catch (...) {
+    LOGE("Cast exception");
+    return nullptr;
+  }
+  return nullptr;
 }

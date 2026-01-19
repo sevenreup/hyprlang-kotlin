@@ -1,5 +1,9 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.library)
+    id("maven-publish")
 }
 
 android {
@@ -40,6 +44,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
 }
 
 dependencies {
@@ -49,4 +59,34 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+}
+
+publishing {
+    publications {
+        register<MavenPublication>("release") {
+            groupId = "dev.cphiri.hyprlang"
+            artifactId = "parser"
+            version = "0.0.1"
+
+            afterEvaluate {
+                from(components["release"])
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/spacedao/hyprlang")
+            credentials {
+                val localProperties = Properties()
+                val localPropertiesFile = rootProject.file("local.properties")
+                if (localPropertiesFile.exists()) {
+                    localProperties.load(FileInputStream(localPropertiesFile))
+                }
+                
+                username = localProperties.getProperty("gpr.user") ?: System.getenv("GITHUB_ACTOR") ?: ""
+                password = localProperties.getProperty("gpr.key") ?: System.getenv("GITHUB_TOKEN") ?: ""
+            }
+        }
+    }
 }

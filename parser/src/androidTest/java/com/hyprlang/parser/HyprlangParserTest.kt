@@ -1,8 +1,7 @@
 package com.hyprlang.parser
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
-import org.junit.Assert.assertEquals
+import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -10,22 +9,91 @@ import org.junit.runner.RunWith
 class HyprlangParserTest {
 
     @Test
-    fun testParseNative() {
-        // Just ensuring context is available, though not strictly needed for the pure string parse
-        val appContext = InstrumentationRegistry.getInstrumentation().targetContext
+    fun testBasicValues() {
+        // ### Basic Values
+        /*
+        count = 42
+        opacity = 0.95
+        terminal = kitty
+        */
         val parser = HyprlangParser()
+        parser.addConfigValue("count", "INT", 0)
+        parser.addConfigValue("opacity", "FLOAT", 0.0)
+        parser.addConfigValue("terminal", "STRING", "")
+
+        val input = """
+            count = 42
+            opacity = 0.95
+            terminal = kitty
+        """.trimIndent()
+
+        val result = parser.parse(input)
+        assertEquals("Parse should succeed", "", result)
+
+        assertEquals(42, parser.getInt("count"))
+        assertEquals(0.95f, parser.getFloat("opacity")!!, 0.001f)
+        assertEquals("kitty", parser.getString("terminal"))
         
-        // This input matches what we currently "support" (hardcoded keys in wrapper)
+        parser.close()
+    }
+    
+    @Test
+    fun testNestedCategories() {
+        // ### Nested Categories
+        /*
+        general {
+            border_size = 2
+            gaps {
+                inner = 5
+                outer = 10
+            }
+        }
+        */
+        val parser = HyprlangParser()
+        parser.addConfigValue("general:border_size", "INT")
+        parser.addConfigValue("general:gaps:inner", "INT")
+        parser.addConfigValue("general:gaps:outer", "INT")
+
         val input = """
             general {
-                border_size = 10
-                gaps_in = 5
+                border_size = 2
+                gaps {
+                    inner = 5
+                    outer = 10
+                }
             }
         """.trimIndent()
 
-        val result = parser.parseNative(input)
+        val result = parser.parse(input)
+        assertEquals("", result)
+
+        assertEquals(2, parser.getInt("general:border_size"))
+        assertEquals(5, parser.getInt("general:gaps:inner"))
+        assertEquals(10, parser.getInt("general:gaps:outer"))
         
-        // We expect empty string on success
-        assertEquals("Parsing failed", "", result)
+        parser.close()
+    }
+
+    @Test
+    fun testVariables() {
+        // ### Variables
+        /*
+        $terminal = kitty
+        my_term = $terminal
+        */
+        val parser = HyprlangParser()
+        parser.addConfigValue("my_term", "STRING")
+
+        val input = """
+            ${'$'}terminal = kitty
+            my_term = ${'$'}terminal
+        """.trimIndent()
+
+        val result = parser.parse(input)
+        assertEquals("", result)
+
+        assertEquals("kitty", parser.getString("my_term"))
+        
+        parser.close()
     }
 }
