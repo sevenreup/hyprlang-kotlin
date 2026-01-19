@@ -66,7 +66,7 @@ publishing {
         register<MavenPublication>("release") {
             groupId = "dev.cphiri.hyprlang"
             artifactId = "parser"
-            version = "0.0.1"
+            version = "0.0.1.1"
 
             afterEvaluate {
                 from(components["release"])
@@ -76,7 +76,7 @@ publishing {
     repositories {
         maven {
             name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/spacedao/hyprlang")
+            url = uri("https://maven.pkg.github.com/sevenreup/hyprlang-kotlin")
             credentials {
                 val localProperties = Properties()
                 val localPropertiesFile = rootProject.file("local.properties")

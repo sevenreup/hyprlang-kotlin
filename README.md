@@ -57,12 +57,21 @@ import dev.cphiri.hyprlang.parser.HyprlangParser
 
 // Use try-with-resources (use) to automatically close the parser
 HyprlangParser().use { parser ->
-```
-    // 1. Register Configuration Keys
-    parser.addConfigValue("general:border_size", "INT")
-    parser.addConfigValue("general:gaps_in", "INT")
-    parser.addConfigValue("opacity", "FLOAT")
-    parser.addConfigValue("terminal", "STRING")
+    
+    // 1. Register Configuration Keys using DSL
+    parser.register {
+        int("count", 0)
+        float("opacity", 1.0f)
+        string("terminal", "kitty")
+        
+        category("general") {
+            int("border_size", 1)
+            category("gaps") {
+                int("in", 5)
+                int("out", 10)
+            }
+        }
+    }
 
     // 2. Define Input String
     val configContent = """
@@ -74,7 +83,7 @@ HyprlangParser().use { parser ->
         terminal = kitty
     """.trimIndent()
 
-    // 3. Parse and Check for Errors
+    // 3. Parse
     val error = parser.parse(configContent)
 
     if (error.isEmpty()) {

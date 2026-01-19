@@ -14,13 +14,57 @@ class HyprlangParser : AutoCloseable {
         nativeHandle = create()
     }
 
-    fun addConfigValue(name: String, type: String, defaultValue: Any? = null) {
-        addConfigValue(nativeHandle, name, type, defaultValue)
+    enum class ConfigType {
+        INT, FLOAT, STRING, VEC2
+    }
+
+    private val registeredKeys = mutableSetOf<String>()
+
+    fun addConfigValue(name: String, type: ConfigType, defaultValue: Any? = null) {
+        if (registeredKeys.add(name)) {
+            addConfigValue(nativeHandle, name, type.name, defaultValue)
+        }
     }
 
     fun parse(input: String): String {
         return parse(nativeHandle, input)
     }
+
+    fun register(block: ConfigBuilder.() -> Unit) {
+        val builder = ConfigBuilder(this)
+        builder.block()
+    }
+
+    class ConfigBuilder(private val parser: HyprlangParser, private val prefix: String = "") {
+        
+        fun int(name: String, default: Int? = null) {
+            registerValue(name, ConfigType.INT, default)
+        }
+
+        fun float(name: String, default: Float? = null) {
+            registerValue(name, ConfigType.FLOAT, default)
+        }
+
+        fun string(name: String, default: String? = null) {
+            registerValue(name, ConfigType.STRING, default)
+        }
+        
+        fun vec2(name: String, default: Any? = null) {
+            registerValue(name, ConfigType.VEC2, default)
+        }
+
+        fun category(name: String, block: ConfigBuilder.() -> Unit) {
+            val newPrefix = if (prefix.isEmpty()) "$name:" else "$prefix$name:"
+            val subBuilder = ConfigBuilder(parser, newPrefix)
+            subBuilder.block()
+        }
+
+        private fun registerValue(name: String, type: ConfigType, default: Any?) {
+            val fullKey = "$prefix$name"
+            parser.addConfigValue(fullKey, type, default)
+        }
+    }
+
     
     fun getInt(name: String): Int? {
         val value = getConfigValue(nativeHandle, name) ?: return null
@@ -33,7 +77,8 @@ class HyprlangParser : AutoCloseable {
     }
     
     fun getString(name: String): String? {
-        return getConfigValue(nativeHandle, name) as? String
+        val value = getConfigValue(nativeHandle, name)
+        return value?.toString()
     }
     
     fun getConfigValue(name: String): Any? {
@@ -46,20 +91,6 @@ class HyprlangParser : AutoCloseable {
             nativeHandle = 0
         }
     }
-    
-    // Deprecated old method
-    fun parseNative(input: String): String {
-        // Fallback or just re-implement using new methods if possible, 
-        // but for now let's keep it unsupported or remove it since we are refactoring.
-        // Or create a temporary instance.
-        val instance = HyprlangParser()
-        instance.addConfigValue("general:border_size", "INT", 0)
-        instance.addConfigValue("general:gaps_in", "INT", 0)
-        instance.addConfigValue("general:gaps_out", "INT", 0)
-        val result = instance.parse(input)
-        instance.close()
-        return result
-    }
 
     private external fun create(): Long
     private external fun destroy(handle: Long)
@@ -67,3 +98,4 @@ class HyprlangParser : AutoCloseable {
     private external fun parse(handle: Long, input: String): String
     private external fun getConfigValue(handle: Long, name: String): Any?
 }
+
