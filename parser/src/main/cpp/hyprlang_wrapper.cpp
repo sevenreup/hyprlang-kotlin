@@ -24,21 +24,23 @@ struct WrapperContext {
 };
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_hyprlang_parser_HyprlangParser_create(JNIEnv *env, jobject thiz) {
+Java_dev_cphiri_hyprlang_parser_HyprlangParser_create(JNIEnv *env,
+                                                      jobject thiz) {
   LOGD("create called");
   return reinterpret_cast<jlong>(new WrapperContext());
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_hyprlang_parser_HyprlangParser_destroy(JNIEnv *env, jobject thiz,
-                                                jlong handle) {
+Java_dev_cphiri_hyprlang_parser_HyprlangParser_destroy(JNIEnv *env,
+                                                       jobject thiz,
+                                                       jlong handle) {
   LOGD("destroy called");
   auto *ctx = reinterpret_cast<WrapperContext *>(handle);
   delete ctx;
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_hyprlang_parser_HyprlangParser_addConfigValue(
+Java_dev_cphiri_hyprlang_parser_HyprlangParser_addConfigValue(
     JNIEnv *env, jobject thiz, jlong handle, jstring name, jstring type,
     jobject defaultValue) {
   auto *ctx = reinterpret_cast<WrapperContext *>(handle);
@@ -55,8 +57,9 @@ Java_com_hyprlang_parser_HyprlangParser_addConfigValue(
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_hyprlang_parser_HyprlangParser_parse(JNIEnv *env, jobject thiz,
-                                              jlong handle, jstring input) {
+Java_dev_cphiri_hyprlang_parser_HyprlangParser_parse(JNIEnv *env, jobject thiz,
+                                                     jlong handle,
+                                                     jstring input) {
   LOGD("parse called");
   auto *ctx = reinterpret_cast<WrapperContext *>(handle);
   const char *nativeInput = env->GetStringUTFChars(input, 0);
@@ -122,10 +125,10 @@ Java_com_hyprlang_parser_HyprlangParser_parse(JNIEnv *env, jobject thiz,
 }
 
 extern "C" JNIEXPORT jobject JNICALL
-Java_com_hyprlang_parser_HyprlangParser_getConfigValue(JNIEnv *env,
-                                                       jobject thiz,
-                                                       jlong handle,
-                                                       jstring name) {
+Java_dev_cphiri_hyprlang_parser_HyprlangParser_getConfigValue(JNIEnv *env,
+                                                              jobject thiz,
+                                                              jlong handle,
+                                                              jstring name) {
   auto *ctx = reinterpret_cast<WrapperContext *>(handle);
   if (!ctx->lastConfig)
     return nullptr;

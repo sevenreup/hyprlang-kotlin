@@ -53,11 +53,11 @@ A Kotlin/Android wrapper for the official [hyprlang](https://github.com/hyprwm/h
 ## Usage
 
 ```kotlin
-import com.hyprlang.parser.HyprlangParser
+import dev.cphiri.hyprlang.parser.HyprlangParser
 
 // Use try-with-resources (use) to automatically close the parser
 HyprlangParser().use { parser ->
-
+```
     // 1. Register Configuration Keys
     parser.addConfigValue("general:border_size", "INT")
     parser.addConfigValue("general:gaps_in", "INT")

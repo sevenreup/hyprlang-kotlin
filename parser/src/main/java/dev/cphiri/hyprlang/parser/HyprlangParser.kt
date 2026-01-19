@@ -1,4 +1,4 @@
-package com.hyprlang.parser
+package dev.cphiri.hyprlang.parser
 
 class HyprlangParser : AutoCloseable {
 

@@ -1,4 +1,4 @@
-package com.hyprlang.parser
+package dev.cphiri.hyprlang.parser
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.*
