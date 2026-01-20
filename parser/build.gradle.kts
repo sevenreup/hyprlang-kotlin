@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
+    implementation(kotlin("reflect"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -66,7 +67,7 @@ publishing {
         register<MavenPublication>("release") {
             groupId = "dev.cphiri.hyprlang"
             artifactId = "parser"
-            version = "0.0.1.1"
+            version = "0.0.1.5"
 
             afterEvaluate {
                 from(components["release"])

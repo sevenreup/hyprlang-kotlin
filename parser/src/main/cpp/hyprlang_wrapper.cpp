@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <android/log.h>
 #include <any>
 #include <hyprlang.hpp>
@@ -13,15 +14,71 @@
 
 using namespace Hyprlang;
 
+struct SpecialCategoryDef {
+  std::string name;
+  std::string key; // empty means nullptr (anonymous)
+  bool anonymousKeyBased;
+};
+
+struct SpecialValueDef {
+  std::string category;
+  std::string name;
+  std::string type;
+};
+
+struct ArrayHandlerDef {
+  std::string name;
+  std::vector<std::string> values;
+};
+
 struct WrapperContext {
   std::vector<std::tuple<std::string, std::string>> keys;
+  std::vector<SpecialCategoryDef> specialCategories;
+  std::vector<SpecialValueDef> specialValues;
+  std::vector<ArrayHandlerDef> arrayHandlers;
   CConfig *lastConfig = nullptr;
 
   ~WrapperContext() {
     if (lastConfig)
       delete lastConfig;
   }
+
+  ArrayHandlerDef *findArrayHandler(const std::string &name) {
+    for (auto &h : arrayHandlers) {
+      if (h.name == name)
+        return &h;
+    }
+    return nullptr;
+  }
 };
+
+static std::vector<WrapperContext *> activeContexts;
+
+static CParseResult arrayCollectorHandler(const char *COMMAND,
+                                          const char *VALUE) {
+  std::string cmd = COMMAND;
+  LOGD("arrayCollectorHandler called: COMMAND=%s VALUE=%s", COMMAND, VALUE);
+
+  for (auto *ctx : activeContexts) {
+    for (auto &handler : ctx->arrayHandlers) {
+      // Handler name might be "testCategory:categoryKeyword" but COMMAND is just
+      // "categoryKeyword" Extract the last part of the handler name for matching
+      std::string shortName = handler.name;
+      size_t colonPos = handler.name.rfind(':');
+      if (colonPos != std::string::npos) {
+        shortName = handler.name.substr(colonPos + 1);
+      }
+
+      if (shortName == cmd) {
+        handler.values.emplace_back(VALUE);
+        LOGD("Array handler collected: %s -> %s = %s", handler.name.c_str(),
+             COMMAND, VALUE);
+        return CParseResult();
+      }
+    }
+  }
+  return CParseResult();
+}
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_cphiri_hyprlang_parser_HyprlangParser_create(JNIEnv *env,
@@ -54,6 +111,67 @@ Java_dev_cphiri_hyprlang_parser_HyprlangParser_addConfigValue(
 
   env->ReleaseStringUTFChars(name, nameStr);
   env->ReleaseStringUTFChars(type, typeStr);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_cphiri_hyprlang_parser_HyprlangParser_addSpecialCategory(
+    JNIEnv *env, jobject thiz, jlong handle, jstring name, jstring key,
+    jboolean anonymousKeyBased) {
+  auto *ctx = reinterpret_cast<WrapperContext *>(handle);
+
+  const char *nameStr = env->GetStringUTFChars(name, 0);
+  const char *keyStr = key ? env->GetStringUTFChars(key, 0) : nullptr;
+
+  LOGD("addSpecialCategory: %s key: %s anonymous: %d", nameStr,
+       keyStr ? keyStr : "null", anonymousKeyBased);
+
+  SpecialCategoryDef def;
+  def.name = nameStr;
+  def.key = keyStr ? keyStr : "";
+  def.anonymousKeyBased = anonymousKeyBased;
+  ctx->specialCategories.push_back(def);
+
+  env->ReleaseStringUTFChars(name, nameStr);
+  if (keyStr)
+    env->ReleaseStringUTFChars(key, keyStr);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_cphiri_hyprlang_parser_HyprlangParser_addSpecialConfigValue(
+    JNIEnv *env, jobject thiz, jlong handle, jstring category, jstring name,
+    jstring type) {
+  auto *ctx = reinterpret_cast<WrapperContext *>(handle);
+
+  const char *catStr = env->GetStringUTFChars(category, 0);
+  const char *nameStr = env->GetStringUTFChars(name, 0);
+  const char *typeStr = env->GetStringUTFChars(type, 0);
+
+  LOGD("addSpecialConfigValue: %s:%s type: %s", catStr, nameStr, typeStr);
+
+  SpecialValueDef def;
+  def.category = catStr;
+  def.name = nameStr;
+  def.type = typeStr;
+  ctx->specialValues.push_back(def);
+
+  env->ReleaseStringUTFChars(category, catStr);
+  env->ReleaseStringUTFChars(name, nameStr);
+  env->ReleaseStringUTFChars(type, typeStr);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_cphiri_hyprlang_parser_HyprlangParser_registerArrayHandler(
+    JNIEnv *env, jobject thiz, jlong handle, jstring name) {
+  auto *ctx = reinterpret_cast<WrapperContext *>(handle);
+
+  const char *nameStr = env->GetStringUTFChars(name, 0);
+  LOGD("registerArrayHandler: %s", nameStr);
+
+  ArrayHandlerDef def;
+  def.name = nameStr;
+  ctx->arrayHandlers.push_back(def);
+
+  env->ReleaseStringUTFChars(name, nameStr);
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -97,10 +215,60 @@ Java_dev_cphiri_hyprlang_parser_HyprlangParser_parse(JNIEnv *env, jobject thiz,
         LOGE("Unknown type: %s", type.c_str());
     }
 
+    // Register special categories
+    for (const auto &cat : ctx->specialCategories) {
+      LOGD("Registering special category: %s", cat.name.c_str());
+      SSpecialCategoryOptions opts;
+      opts.key = cat.key.empty() ? nullptr : cat.key.c_str();
+      opts.anonymousKeyBased = cat.anonymousKeyBased;
+      ctx->lastConfig->addSpecialCategory(cat.name.c_str(), opts);
+    }
+
+    // Register special config values
+    for (const auto &val : ctx->specialValues) {
+      LOGD("Registering special value: %s:%s", val.category.c_str(),
+           val.name.c_str());
+      if (val.type == "INT")
+        ctx->lastConfig->addSpecialConfigValue(val.category.c_str(),
+                                               val.name.c_str(),
+                                               CConfigValue((INT)0));
+      else if (val.type == "FLOAT")
+        ctx->lastConfig->addSpecialConfigValue(val.category.c_str(),
+                                               val.name.c_str(),
+                                               CConfigValue((FLOAT)0.0));
+      else if (val.type == "STRING")
+        ctx->lastConfig->addSpecialConfigValue(val.category.c_str(),
+                                               val.name.c_str(),
+                                               CConfigValue((STRING) ""));
+      else if (val.type == "VEC2")
+        ctx->lastConfig->addSpecialConfigValue(
+            val.category.c_str(), val.name.c_str(),
+            CConfigValue(SVector2D{0, 0}));
+      else
+        LOGE("Unknown type for special value: %s", val.type.c_str());
+    }
+
+    // Register array handlers and clear previous values
+    for (auto &handler : ctx->arrayHandlers) {
+      LOGD("Registering array handler: %s", handler.name.c_str());
+      handler.values.clear();
+      ctx->lastConfig->registerHandler(&arrayCollectorHandler,
+                                        handler.name.c_str(),
+                                        SHandlerOptions{.allowFlags = false});
+    }
+
+    // Add context to active list for handler callbacks
+    activeContexts.push_back(ctx);
+
     LOGD("Commencing");
     ctx->lastConfig->commence();
     LOGD("Parsing");
     CParseResult result = ctx->lastConfig->parse();
+
+    // Remove context from active list
+    activeContexts.erase(
+        std::remove(activeContexts.begin(), activeContexts.end(), ctx),
+        activeContexts.end());
 
     env->ReleaseStringUTFChars(input, nativeInput);
 
@@ -169,4 +337,114 @@ Java_dev_cphiri_hyprlang_parser_HyprlangParser_getConfigValue(JNIEnv *env,
     return nullptr;
   }
   return nullptr;
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_dev_cphiri_hyprlang_parser_HyprlangParser_listKeysForSpecialCategory(
+    JNIEnv *env, jobject thiz, jlong handle, jstring category) {
+  auto *ctx = reinterpret_cast<WrapperContext *>(handle);
+  if (!ctx->lastConfig)
+    return nullptr;
+
+  const char *catStr = env->GetStringUTFChars(category, 0);
+  LOGD("listKeysForSpecialCategory: %s", catStr);
+
+  auto keys = ctx->lastConfig->listKeysForSpecialCategory(catStr);
+  env->ReleaseStringUTFChars(category, catStr);
+
+  jclass stringClass = env->FindClass("java/lang/String");
+  jobjectArray result = env->NewObjectArray(keys.size(), stringClass, nullptr);
+
+  for (size_t i = 0; i < keys.size(); i++) {
+    jstring keyStr = env->NewStringUTF(keys[i].c_str());
+    env->SetObjectArrayElement(result, i, keyStr);
+    env->DeleteLocalRef(keyStr);
+  }
+
+  return result;
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_dev_cphiri_hyprlang_parser_HyprlangParser_getSpecialConfigValue(
+    JNIEnv *env, jobject thiz, jlong handle, jstring category, jstring name,
+    jstring key) {
+  auto *ctx = reinterpret_cast<WrapperContext *>(handle);
+  if (!ctx->lastConfig)
+    return nullptr;
+
+  const char *catStr = env->GetStringUTFChars(category, 0);
+  const char *nameStr = env->GetStringUTFChars(name, 0);
+  const char *keyStr = key ? env->GetStringUTFChars(key, 0) : nullptr;
+
+  LOGD("getSpecialConfigValue: %s:%s key=%s", catStr, nameStr,
+       keyStr ? keyStr : "null");
+
+  auto val = ctx->lastConfig->getSpecialConfigValue(catStr, nameStr, keyStr);
+
+  env->ReleaseStringUTFChars(category, catStr);
+  env->ReleaseStringUTFChars(name, nameStr);
+  if (keyStr)
+    env->ReleaseStringUTFChars(key, keyStr);
+
+  if (!val.has_value()) {
+    return nullptr;
+  }
+
+  try {
+    if (val.type() == typeid(INT)) {
+      long long v = std::any_cast<INT>(val);
+      jclass cls = env->FindClass("java/lang/Integer");
+      jmethodID mid =
+          env->GetStaticMethodID(cls, "valueOf", "(I)Ljava/lang/Integer;");
+      return env->CallStaticObjectMethod(cls, mid, (int)v);
+    } else if (val.type() == typeid(FLOAT)) {
+      float v = std::any_cast<FLOAT>(val);
+      jclass cls = env->FindClass("java/lang/Float");
+      jmethodID mid =
+          env->GetStaticMethodID(cls, "valueOf", "(F)Ljava/lang/Float;");
+      return env->CallStaticObjectMethod(cls, mid, v);
+    } else if (val.type() == typeid(STRING)) {
+      try {
+        const char *s = std::any_cast<STRING>(val);
+        return env->NewStringUTF(s);
+      } catch (...) {
+        return nullptr;
+      }
+    }
+  } catch (...) {
+    LOGE("Cast exception in getSpecialConfigValue");
+    return nullptr;
+  }
+  return nullptr;
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_dev_cphiri_hyprlang_parser_HyprlangParser_getArrayValues(JNIEnv *env,
+                                                               jobject thiz,
+                                                               jlong handle,
+                                                               jstring name) {
+  auto *ctx = reinterpret_cast<WrapperContext *>(handle);
+
+  const char *nameStr = env->GetStringUTFChars(name, 0);
+  LOGD("getArrayValues: %s", nameStr);
+
+  auto *handler = ctx->findArrayHandler(nameStr);
+  env->ReleaseStringUTFChars(name, nameStr);
+
+  if (!handler) {
+    LOGE("Array handler not found");
+    return nullptr;
+  }
+
+  jclass stringClass = env->FindClass("java/lang/String");
+  jobjectArray result =
+      env->NewObjectArray(handler->values.size(), stringClass, nullptr);
+
+  for (size_t i = 0; i < handler->values.size(); i++) {
+    jstring valStr = env->NewStringUTF(handler->values[i].c_str());
+    env->SetObjectArrayElement(result, i, valStr);
+    env->DeleteLocalRef(valStr);
+  }
+
+  return result;
 }
